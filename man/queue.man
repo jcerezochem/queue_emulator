@@ -1,0 +1,9 @@
+Queue emulator
+--------------
+
+Conjunto de scripts para emular el comportamiento 
+de un sistema de colas.
+
+qsub
+
+
