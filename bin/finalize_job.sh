@@ -42,7 +42,17 @@ rm $QUEUE_TMP/.running.*.$JOB_ID 2>/dev/null
 
 # If Flag was F, that means a failure of the queue system and the job was not properly
 # allocated, so no next job is tried
-if [ "$STAFLAG" == "F" ]; then exit; fi
+if [ "$STAFLAG" == "F" ]; then 
+    cat <<EOF >> $QUEUE_LOG/err.log
+Failure report for job eq_$JOB_ID
+Date: $NOW
+Owner: $USER
+Raised from: $0
+Message:
+ Job in the queue was not found among active PIDs (with ps aux)
+
+EOF
+fi
 
 # Get number of procesors avilable
 ls $QUEUE_TMP/.running.* 2>/dev/null 1>$QUEUE_TMP/.running.rest.tmp
@@ -82,24 +92,25 @@ for (( i=1; i<=$N; i++ )); do
     nextjob=${file##*/}; nextjob=${nextjob##.waiting.}
     NEXT_ID=${nextjob##*.} 
     NPROC=${nextjob%.*}
-    t_update=$(head -n$i $QUEUE_TMP/.timing.tmp | tail -n1 | awk '{print $6}')
-    t_now=$(date '+%s')
-    (( t_elapsed = t_now - t_update ))
-    # 
-    # This is disabled because it erases the diffence in date between files
-    # which is used to set the priority of the waiting jobs
-    #
-    (( t_elapsed = 0 )) 
-    #
-    # An equivalent check (even better) can be done checking the pid (TODO)
-    # as it is done in qdel
-    #
-    if (( t_elapsed > 600 )); then
-        rm $file
-        echo "Job $NEXT_ID is dead and so removed from the queue" >> $QUEUE_LOG/dead.jobs
-    else
+    # Check that pid is alive and associated to a bash run
+    # of the user
+    jobinfo=$(egrep "^qe_${NEXT_ID} " $QUEUE_LOG/queue.log)
+    if (( $? !=0 )); then 
+        # We should never end up here (but this seems 
+        # a safe treatment of this weird situation)
+        $QUEUE_BIN/finalize_job.sh ${NEXT_ID} 'F'
+        continue
+    fi
+    pid=$(echo "$jobinfo" | awk '{print $2}')
+    pid=${pid/\(/}; pid=${pid/\)/}
+    user=$(echo "$jobinfo" | awk '{print $3}')
+    job_pid=$(ps aux | egrep "^${user}[\ ]+${pid} " | awk '{print $11}')
+    if [ "$job_pid" == "bash" ]; then
         found_next=true
         break
+    else
+        $QUEUE_BIN/finalize_job.sh ${NEXT_ID} 'F'
+        continue
     fi
 done
 rm $QUEUE_TMP/.timing.tmp

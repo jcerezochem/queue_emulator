@@ -24,7 +24,7 @@ help=false
 #READING INPUT DATA FROM COMMAND LINE
 while test "x$1" != x ; do
     case $1 in
-     -h         ) job_command=${$job_command/$1/}; help=true     ;;
+     -h         ) job_command=${job_command/$1/}; help=true     ;;
     esac
     shift
 done

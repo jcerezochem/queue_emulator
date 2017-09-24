@@ -24,7 +24,7 @@ help=false
 #READING INPUT DATA FROM COMMAND LINE
 while test "x$1" != x ; do
     case $1 in
-     -h         ) job_command=${$job_command/$1/}; help=true     ;;
+     -h         ) job_command=${job_command/$1/}; help=true     ;;
     esac
     shift
 done
@@ -51,6 +51,10 @@ for id in $job_command; do
     pid=$(echo "$jobinfo" | awk '{print $2}')
     pid=${pid/\(/}; pid=${pid/\)/}
     user=$(echo "$jobinfo" | awk '{print $3}')
+    if [ "$user" != "$USER" ]; then
+        echo "Only owned jobs can be deleted, and qe_$id in owned by $user"
+        continue
+    fi
     # Check that pid is alive and associeted to a bash run
     # of the user
     job_pid=$(ps aux | egrep "^${user}[\ ]+${pid} " | awk '{print $11}')

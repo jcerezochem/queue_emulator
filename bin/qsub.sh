@@ -70,9 +70,38 @@ NOW=$(date "+%d %b %y %H:%M:%S")
 $QUEUE_BIN/start_job.sh $JOB_ID $nproc
 if (( $? != 0 )); then
     echo ""
-    echo "Error: el trabajo no ha sido enviado"
+    echo "Error: job was not submitted"
     echo ""
     exit
+fi
+
+# Check if the program is callable
+prog=$(echo $job_command | awk '{print $1}')
+which $prog &>/dev/null
+if (( $? != 0 )); then
+    # Check if the program is a local script
+    if [ ! -e $prog ]; then
+        echo ""
+        echo "Error: the called program $prog does not exist"
+        echo "       Aborting submision to queue"
+        echo ""
+        exit
+    fi
+    which ./$prog &>/dev/null
+    if (( $? != 0 )); then
+        echo ""
+        echo "Error: the called program $prog does not have execution"
+        echo "       permisions. Make it callable typing:"
+        echo ""
+        echo "        chmod u+x ./$prog"
+        echo ""
+        echo "       Then try to submit to the queue again"
+        echo ""
+        exit
+    else
+        #Prepend ./ to submit the job
+        job_command=${job_command/$prog/\.\/$prog}
+    fi
 fi
 
 # And submit the job appending instructions for the queue
@@ -115,7 +144,7 @@ EOF
 # Add entry to qstat.log
 JOB_ID="qe_$JOB_ID ($pid)"
 status=$(ps aux | egrep "^$USER[\ ]+$pid\ " | egrep -v "egrep" | \
-         awk '{printf "%-18s %10s   Q   %2s    %17s %-20s\n", "'"$JOB_ID"'",$1,"'"$nproc"'","'"$NOW"'","'"$job_command"'"}' | \
+         awk '{printf "%-18s %10s     Q      %2s       %17s      %-20s\n", "'"$JOB_ID"'",$1,"'"$nproc"'","'"$NOW"'","'"$job_command"'"}' | \
          tee $QUEUE_LOG/.queue.log.tmp | wc -c)
 cat $QUEUE_LOG/.queue.log.tmp >> $QUEUE_LOG/queue.log
 rm  $QUEUE_LOG/.queue.log.tmp
