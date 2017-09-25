@@ -16,7 +16,7 @@ QUEUE_MAN=$QUEUE_PATH/man
 #######################################################
 
 # Read job command
-job_command=$@
+input=$@
 
 # Defaults
 help=false
@@ -24,7 +24,7 @@ help=false
 #READING INPUT DATA FROM COMMAND LINE
 while test "x$1" != x ; do
     case $1 in
-     -h         ) job_command=${job_command/$1/}; help=true     ;;
+     -h         ) input=${input/$1/}; help=true     ;;
     esac
     shift
 done
@@ -42,33 +42,41 @@ if $help; then
 fi
 
 # Run over all privided ids
-for id in $job_command; do
+for id in $input; do
     # Allow giving the ID both with qe_ and without
     id=${id##qe_}
     # Grep job info from queue.log
     jobinfo=$(egrep "^qe_${id} " $QUEUE_LOG/queue.log)
     if (( $? !=0 )); then continue; fi
-    pid=$(echo "$jobinfo" | awk '{print $2}')
-    pid=${pid/\(/}; pid=${pid/\)/}
+    pgid=$(echo "$jobinfo" | awk '{print $2}')
+    pgid=${pgid/\(/}; pgid=${pgid/\)/}
     user=$(echo "$jobinfo" | awk '{print $3}')
     if [ "$user" != "$USER" ]; then
         echo "Only owned jobs can be deleted, and qe_$id in owned by $user"
         continue
     fi
-    # Check that pid is alive and associeted to a bash run
-    # of the user
-    job_pid=$(ps aux | egrep "^${user}[\ ]+${pid} " | awk '{print $11}')
-    if [ "$job_pid" == "bash" ]; then
+    # Check that pgid is alive and associeted to the job_command
+    job_command=$(echo $jobinfo | awk '{print $10}')
+    job_command=${job_command/\.\//}
+    job_pgid=$(ps x -o  "%u %p %r %y %x %c " | egrep "^${user}[\ ]+[0-9]+[\ ]+${pgid} " | grep $job_command | awk '{print $6}')
+    # And get the status
+    stat=$(echo $jobinfo | awk '{print $4}')
+    if [ "$job_pgid" == "$job_command" ]; then
         # Killing a running or waiting job
-        # Check that the job did not finish yet, and proceed
+        # Check again that the job did not finish, and proceed
         egrep "^qe_${id} " $QUEUE_LOG/queue.log &>/dev/null
         if (( $? ==0 )); then
-            echo "Stopping job $id ($pid)"
+            if [ "$stat" == "R" ]; then
+                echo "Stopping job $id ($pgid)"
+            elif [ "$stat" == "Q" ]; then
+                echo "Removing job $id ($pgid) from queue"
+            fi
+            kill -9 -$pgid
             $QUEUE_BIN/finalize_job.sh $id 'K'
         fi
     else
         # Killing a job that is not running nor waiting (should not be there)
-        echo "Job $id ($pid) does not seem to be running"
+        echo "Job $id ($pgid) does not seem to be running"
         echo "Cleaning registers..."
         $QUEUE_BIN/finalize_job.sh $id 'F'
     fi

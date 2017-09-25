@@ -41,5 +41,8 @@ if $help; then
     exit
 fi
 
-cat $QUEUE_LOG/queue.log
+N=$(wc -l < $QUEUE_LOG/queue.log)
+if (( $N > 2 )); then
+    cat $QUEUE_LOG/queue.log
+fi
 

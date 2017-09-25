@@ -141,8 +141,19 @@ $job_command
 $QUEUE_BIN/finalize_job.sh $JOB_ID 'D'
 EOF
 
+# We got the pid of the launching script, but we need to group pid 
+# to kill all the child proceses (see https://stackoverflow.com/questions/392022/best-way-to-kill-all-child-processes)
+pgid=$(ps x -o  "%u %p %r %y %x %c " | egrep "^$USER[\ ]+$pid " | awk '{print $3}')
+if [ "x$pgid" == "x" ]; then
+    echo ""
+    echo "Error: el proceso de envío no se ha podido completar"
+    echo "       (PGID not active)"
+    echo ""
+    exit
+fi
+
 # Add entry to qstat.log
-JOB_ID="qe_$JOB_ID ($pid)"
+JOB_ID="qe_$JOB_ID ($pgid)"
 status=$(ps aux | egrep "^$USER[\ ]+$pid\ " | egrep -v "egrep" | \
          awk '{printf "%-18s %10s     Q      %2s       %17s      %-20s\n", "'"$JOB_ID"'",$1,"'"$nproc"'","'"$NOW"'","'"$job_command"'"}' | \
          tee $QUEUE_LOG/.queue.log.tmp | wc -c)
