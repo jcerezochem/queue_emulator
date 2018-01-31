@@ -44,7 +44,7 @@ if $help; then
     # For the moment add the basic info
     cat <<EOF
 USAGE
-   qstat job.scritp [options]
+   qssub job.scritp [options]
 
 EOF
     #PRINT ACTUAL PARAMETERS IN USE
@@ -55,6 +55,13 @@ CURRENT OPTIONS
    -h       print help and quit          $help
 
 EOF
+    exit
+fi
+
+# The input correspond to the job command
+job_command=$input
+if [ "x${job_command// /}" == "x" ]; then
+    echo "Error: no program to submit"
     exit
 fi
 
