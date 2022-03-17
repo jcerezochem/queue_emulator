@@ -16,15 +16,17 @@ QUEUE_MAN=$QUEUE_PATH/man
 #######################################################
 
 # Read job command
-job_command=$@
+input=$@
 
 # Defaults
 help=false
+jobid="None"
 
 #READING INPUT DATA FROM COMMAND LINE
 while test "x$1" != x ; do
     case $1 in
-     -h         ) job_command=${job_command/$1/}; help=true     ;;
+     -j         ) input=${input/$1/}; shift; input=${input/$1/}; jobid=$1     ;;
+     -h         ) input=${input/$1/}; help=true     ;;
     esac
     shift
 done
@@ -41,8 +43,31 @@ if $help; then
     exit
 fi
 
-N=$(wc -l < $QUEUE_LOG/queue.log)
-if (( $N > 2 )); then
-    cat $QUEUE_LOG/queue.log
+if [ "$jobid" == "None" ]; then
+    # Default behaviour: show basic info about all jobs
+    N=$(wc -l < $QUEUE_LOG/queue.log)
+    if (( $N > 2 )); then
+        cat $QUEUE_LOG/queue.log
+    fi
+else
+    echo ""
+    jobid=${jobid/qe_/}
+    # Show specific info about jobid
+    iswaiting=$(ls $QUEUE_TMP/.waiting.*.$jobid 2>/dev/null)
+    isrunning=$(ls $QUEUE_TMP/.running.*.$jobid 2>/dev/null)
+    if   [ "$iswaiting" != "" ]; then
+        echo "Job qe_${jobid} is queued"
+        echo "-------------------------------"
+        cat $QUEUE_TMP/.waiting.*.$jobid
+        echo "-------------------------------"
+    elif [ "$isrunning" != "" ]; then
+        echo "Jos qe_${jobid} is running"
+        echo "-------------------------------"
+        cat $QUEUE_TMP/.running.*.$jobid
+        echo "-------------------------------"
+    else
+        echo "qe_${jobid} is not an active job"
+    fi
+    echo ""
 fi
 

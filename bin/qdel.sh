@@ -47,7 +47,10 @@ for id in $input; do
     id=${id##qe_}
     # Grep job info from queue.log
     jobinfo=$(egrep "^qe_${id} " $QUEUE_LOG/queue.log)
-    if (( $? !=0 )); then continue; fi
+    if (( $? !=0 )); then 
+        echo "qe_$id is not a running nor queued job"
+        continue; 
+    fi
     pgid=$(echo "$jobinfo" | awk '{print $2}')
     pgid=${pgid/\(/}; pgid=${pgid/\)/}
     user=$(echo "$jobinfo" | awk '{print $3}')
@@ -58,10 +61,10 @@ for id in $input; do
     # Check that pgid is alive and associeted to the job_command
     job_command=$(echo $jobinfo | awk '{print $10}')
     job_command=${job_command/\.\//}
-    job_pgid=$(ps x -o  "%u %p %r %y %x %c " | egrep "^${user}[\ ]+[0-9]+[\ ]+${pgid} " | grep $job_command | awk '{print $6}')
+    job_pgid=$(ps x -o  "%u %p %r %y %x %c " | egrep "^${user}[\ ]+[0-9]+[\ ]+${pgid} ")
     # And get the status
     stat=$(echo $jobinfo | awk '{print $4}')
-    if [ "$job_pgid" == "$job_command" ]; then
+    if [ "x$job_pgid" != "x$" ]; then
         # Killing a running or waiting job
         # Check again that the job did not finish, and proceed
         egrep "^qe_${id} " $QUEUE_LOG/queue.log &>/dev/null

@@ -17,20 +17,20 @@ QUEUE_MAN=$QUEUE_PATH/man
 
 # Defauts
 help=false
-nproc=16
+nproc=1
 
 # Read job command
-job_command=$@
+input=$@
 
 #READING INPUT DATA FROM COMMAND LINE
+np_opt=""
 while test "x$1" != x ; do
     case $1 in
-     -np        ) job_command=${job_command/$1/}; shift; job_command=${job_command/$1/}; nproc="$1"    ;;
-     -h         ) job_command=${job_command/$1/}; help=true  ;;
+     -np        ) shift; nproc="$1"; np_opt=$(echo $input | egrep "\-np[\ ]+$nproc" -o); input=${input/$np_opt/}  ;;
+     -h         ) input=${input/$1/}; help=true  ;;
     esac
     shift
 done
-
 
 # Help if requested
 if $help; then
@@ -44,7 +44,7 @@ if $help; then
     # For the moment add the basic info
     cat <<EOF
 USAGE
-   qssub job.scritp [options]
+   qsub job.scritp [options]
 
 EOF
     #PRINT ACTUAL PARAMETERS IN USE
@@ -68,20 +68,8 @@ fi
 # The current time
 NOW=$(date "+%d %b %y %H:%M:%S")
 
-# Send to "queue system"
-#-------------------------
-# Get ID for this job (JOB_ID) and compared with the currently allowed signal
-(( JOB_ID = $(read i <$QUEUE_LOG/id.server; (( i=$i+1 )); echo $i | tee $QUEUE_LOG/id.server) ))
-
-# Prepare queue to start the job
-$QUEUE_BIN/start_job.sh $JOB_ID $nproc
-if (( $? != 0 )); then
-    echo ""
-    echo "Error: job was not submitted"
-    echo ""
-    exit
-fi
-
+# Preliminar checks
+#-----------------------------------------
 # Check if the program is callable
 prog=$(echo $job_command | awk '{print $1}')
 which $prog &>/dev/null
@@ -111,6 +99,40 @@ if (( $? != 0 )); then
     fi
 fi
 
+# Check if number of jobs requested exceed number of jobs allowed to the user
+user=$USER
+#  get number of procesors used by the user
+ls -l $QUEUE_TMP/.running.* 2>/dev/null | grep " $user " > $QUEUE_TMP/.running.subm.tmp
+(( nproc_user = 0 ))
+while read runjob; do 
+    runjob=${runjob##*/}
+    np_used_job=${runjob/.running./}
+    np_used_job=${np_used_job%.*}
+    (( nproc_user += $np_used_job ))
+done < $QUEUE_TMP/.running.subm.tmp
+rm $QUEUE_TMP/.running.subm.tmp
+#  and get limit for the user if there is any
+line=$(grep "$user" $QUEUE_LOG/nproc_limits.dat)
+if [ "x$line" != "x" ]; then
+    nproc_limit=$(echo $line | awk '{print $2}')
+else
+    nproc_limit=$QUEUE_NPROC
+fi
+
+# Send to "queue system"
+#-------------------------
+# Get ID for this job (JOB_ID) and compared with the currently allowed signal
+(( JOB_ID = $(read i <$QUEUE_LOG/id.server; (( i=$i+1 )); echo $i | tee $QUEUE_LOG/id.server) ))
+
+# Prepare queue to start the job
+$QUEUE_BIN/start_job.sh $JOB_ID $nproc
+if (( $? != 0 )); then
+    echo ""
+    echo "Error: job was not submitted"
+    echo ""
+    exit
+fi
+
 # And submit the job appending instructions for the queue
 cat <<EOF | nohup bash 1> job${JOB_ID}.out 2>job${JOB_ID}.err & pid=$!
 # Let time to build the log entry
@@ -119,17 +141,7 @@ sleep 1
 # Check if we got allowed
 (( i=0 ))
 while [ ! -e $QUEUE_TMP/.running.$nproc.$JOB_ID ]; do
-    # 
-    # This is comented because it erases the diffence in date between files
-    # which is used to set the priority of the waiting jobs
-    # 
-    # # Touch the file ever 500 s but check if allowed every 10
-    # if ! (( \$(( i%50 )) )); then
-    #     touch $QUEUE_YMP/.waiting.$nproc.$JOB_ID
-    #     (( i=0 ))
-    # fi
     sleep 10
-    # (( i++ ))
 done
 
 # Replace status label
@@ -162,7 +174,7 @@ fi
 # Add entry to qstat.log
 JOB_ID="qe_$JOB_ID ($pgid)"
 status=$(ps aux | egrep "^$USER[\ ]+$pid\ " | egrep -v "egrep" | \
-         awk '{printf "%-18s %10s     Q      %2s       %17s      %-20s\n", "'"$JOB_ID"'",$1,"'"$nproc"'","'"$NOW"'","'"$job_command"'"}' | \
+         awk '{printf "%-18s %10s     Q      %2s       %17s      %-20s\n", "'"$JOB_ID"'",$1,"'"$nproc"'","'"$NOW"'",substr("'"$job_command"'",0,20)}' | \
          tee $QUEUE_LOG/.queue.log.tmp | wc -c)
 cat $QUEUE_LOG/.queue.log.tmp >> $QUEUE_LOG/queue.log
 rm  $QUEUE_LOG/.queue.log.tmp

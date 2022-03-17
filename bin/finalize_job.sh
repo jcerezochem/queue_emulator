@@ -15,7 +15,7 @@ QUEUE_TMP=$QUEUE_PATH/tmp
 QUEUE_MAN=$QUEUE_PATH/man
 #
 # Queue parameters
-QUEUE_NPROC=16
+QUEUE_NPROC=4
 #######################################################
 
 # The input provides the current job id and exit flag
@@ -71,6 +71,12 @@ if (( NP_AVAIL <= 0 )); then
     exit
 fi
 
+#--------------------------------------------------
+# Look for all jobs that have place in the queue
+# (may not such a good idea, as jobs with 8 proc
+#  will have more priority in crowded days)
+#--------------------------------------------------
+while (( NP_AVAIL >= 0 )); do
 # Now check waiting IDs
 # Filtering only jobs that require nproc <= avail
 ls_list="$QUEUE_TMP/.waiting.0.*"; 
@@ -79,45 +85,90 @@ for (( i=1; i<=$NP_AVAIL; i++ )); do
 done
 ls -ltr $ls_list --time-style="+%s" >  $QUEUE_TMP/.timing.tmp 2>/dev/null
 
+# Remove user that have no more procs allowed
+if [ -e $QUEUE_TMP/.deny.users.tmp ]; then
+while read denied_user; do
+    sed -i "/ $denied_user /d" $QUEUE_TMP/.timing.tmp
+done < $QUEUE_TMP/.deny.users.tmp
+fi
+
 N=$(wc -l < $QUEUE_TMP/.timing.tmp)
 # If $QUEUE_TMP/.timing.tmp is empty, there is not awaiting job
 if (( $N == 0 )); then
     rm $QUEUE_TMP/.timing.tmp
+    if [ -e $QUEUE_TMP/.deny.users.tmp ]; then rm $QUEUE_TMP/.deny.users.tmp; fi
     exit
 fi
-# If job did not update its waiting mark within the last 10 min they are dead
+
+# Found all jobs that have place in the queue
 found_next=false
 for (( i=1; i<=$N; i++ )); do
     file=$(head -n$i $QUEUE_TMP/.timing.tmp | tail -n1 | awk '{print $7}')
     nextjob=${file##*/}; nextjob=${nextjob##.waiting.}
     NEXT_ID=${nextjob##*.} 
     NPROC=${nextjob%.*}
-    # Check that pid is alive and associated to a bash run
-    # of the user
+
+    #--------------------
+    # Additional checks
+    #--------------------
+    # Check that pgid is alive and associated to a bash run
+    #---------------------------------------------------------
     jobinfo=$(egrep "^qe_${NEXT_ID} " $QUEUE_LOG/queue.log)
     if (( $? !=0 )); then 
         # We should never end up here (but this seems 
         # a safe treatment of this weird situation)
         $QUEUE_BIN/finalize_job.sh ${NEXT_ID} 'F'
+        (( NPROC = 0 ))
         continue
     fi
-    pid=$(echo "$jobinfo" | awk '{print $2}')
-    pid=${pid/\(/}; pid=${pid/\)/}
+    pgid=$(echo "$jobinfo" | awk '{print $2}')
+    pgid=${pgid/\(/}; pgid=${pgid/\)/}
     user=$(echo "$jobinfo" | awk '{print $3}')
-    job_pid=$(ps aux | egrep "^${user}[\ ]+${pid} " | awk '{print $11}')
-    if [ "$job_pid" == "bash" ]; then
+    job_pgid=$(ps x -o  "%u %p %r %y %x %c " | egrep "^${user}[\ ]+[0-9]+[\ ]+${pgid} " | grep "bash" | tail -n1 | awk '{print $6}')
+    if [ "$job_pgid" != "bash" ]; then
+        $QUEUE_BIN/finalize_job.sh ${NEXT_ID} 'F'
+        (( NPROC = 0 ))
+        continue
+    fi
+    # Check also if the user has nproc limits
+    #---------------------------------------------------------
+    user=$(ls -l $QUEUE_TMP/.waiting.$NPROC.$NEXT_ID | awk '{print $3}')
+    #  get number of procesors used by the user
+    ls -l $QUEUE_TMP/.running.* 2>/dev/null | grep " $user " > $QUEUE_TMP/.running.rest.tmp
+    (( nproc_user = 0 ))
+    while read runjob; do 
+        runjob=${runjob##*/}
+        np_used_job=${runjob/.running./}
+        np_used_job=${np_used_job%.*}
+        (( nproc_user += $np_used_job ))
+    done < $QUEUE_TMP/.running.rest.tmp
+    rm $QUEUE_TMP/.running.rest.tmp
+    #  and get limit for the user if there is any
+    line=$(grep "$user" $QUEUE_LOG/nproc_limits.dat)
+    if [ "x$line" != "x" ]; then
+        nproc_limit=$(echo $line | awk '{print $2}')
+    else
+        nproc_limit=$QUEUE_NPROC
+    fi
+    (( np_avail_user = $nproc_limit - nproc_user ))
+    if (( np_avail_user >= $NPROC )); then
         found_next=true
         break
     else
-        $QUEUE_BIN/finalize_job.sh ${NEXT_ID} 'F'
-        continue
+        echo "$USER" >> $QUEUE_TMP/.deny.users.tmp
     fi
 done
 rm $QUEUE_TMP/.timing.tmp
 
-# Trun waiting mark into running mark 
+# Allow job if possible
 if $found_next; then
+    # Turn waiting mark into running mark 
     mv $QUEUE_TMP/.waiting.$NPROC.$NEXT_ID $QUEUE_TMP/.running.$NPROC.$NEXT_ID
     chmod g+w $QUEUE_TMP/.running.$NPROC.$NEXT_ID
+    (( NP_AVAIL -= NPROC ))
 fi
 
+
+# Here finishes the do loop utill N_AVAIL>=0
+done
+if [ -e $QUEUE_TMP/.deny.users.tmp ]; then rm $QUEUE_TMP/.deny.users.tmp; fi
